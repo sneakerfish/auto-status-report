@@ -23,6 +23,7 @@ class Settings:
         # Report Configuration
         self.default_days_back = int(os.getenv("DEFAULT_DAYS_BACK", "7"))
         self.report_format = os.getenv("REPORT_FORMAT", "markdown")
+        self.include_collaborator_repos = os.getenv("INCLUDE_COLLABORATOR_REPOS", "false").lower() == "true"
         
         # GitHub API Configuration
         self.github_api_base_url = "https://api.github.com"

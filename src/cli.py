@@ -81,26 +81,52 @@ def daily(date, repos, output, format):
 
 
 @cli.command()
-def repos():
+@click.option('--include-collaborator', is_flag=True, help='Include repositories where you are a collaborator')
+def repos(include_collaborator):
     """List all available repositories."""
     
     app = AutoStatusReportApp()
     
     try:
         click.echo("Fetching repositories...")
-        repository_names = app.list_repositories()
         
-        if not repository_names:
-            click.echo("No repositories found.")
-            return
-        
-        click.echo(f"\nFound {len(repository_names)} repositories:")
-        click.echo("-" * 40)
-        
-        for i, repo in enumerate(repository_names, 1):
-            click.echo(f"{i:2d}. {repo}")
+        if include_collaborator:
+            # Get both owned and collaborator repositories
+            owned_repos = app.list_repositories()
+            collaborator_repos = app.github_client.get_collaborator_repositories()
+            
+            click.echo(f"\n📁 Owned Repositories ({len(owned_repos)}):")
+            click.echo("-" * 40)
+            for i, repo in enumerate(owned_repos, 1):
+                click.echo(f"{i:2d}. {repo} (owned)")
+            
+            if collaborator_repos:
+                click.echo(f"\n🤝 Collaborator Repositories ({len(collaborator_repos)}):")
+                click.echo("-" * 40)
+                for i, repo in enumerate(collaborator_repos, len(owned_repos) + 1):
+                    click.echo(f"{i:2d}. {repo.full_name} (collaborator)")
+            
+            total_repos = owned_repos + [repo.name for repo in collaborator_repos]
+        else:
+            # Only owned repositories (default behavior)
+            repository_names = app.list_repositories()
+            
+            if not repository_names:
+                click.echo("No owned repositories found.")
+                click.echo("💡 Use --include-collaborator to see repositories where you're a collaborator")
+                return
+            
+            click.echo(f"\n📁 Owned Repositories ({len(repository_names)}):")
+            click.echo("-" * 40)
+            
+            for i, repo in enumerate(repository_names, 1):
+                click.echo(f"{i:2d}. {repo}")
+            
+            total_repos = repository_names
         
         click.echo(f"\nUse --repos/-r with any of these names to filter reports.")
+        if not include_collaborator:
+            click.echo("💡 Add --include-collaborator to see repositories where you're a collaborator")
         
     except Exception as e:
         click.echo(f"❌ Error fetching repositories: {e}", err=True)
@@ -215,6 +241,7 @@ def config():
     click.echo(f"Ollama Model: {settings.ollama_model}")
     click.echo(f"Default Days Back: {settings.default_days_back}")
     click.echo(f"Report Format: {settings.report_format}")
+    click.echo(f"Include Collaborator Repos: {settings.include_collaborator_repos}")
     click.echo(f"GitHub API URL: {settings.github_api_base_url}")
 
 

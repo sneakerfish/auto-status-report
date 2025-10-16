@@ -155,10 +155,21 @@ class AutoStatusReportApp:
             )
             print(content)
     
-    def list_repositories(self) -> List[str]:
+    def list_repositories(self, include_collaborator: bool = None) -> List[str]:
         """List all available repositories."""
-        repos = self.github_client.get_user_repositories()
-        return [repo.name for repo in repos]
+        if include_collaborator is None:
+            include_collaborator = settings.include_collaborator_repos
+            
+        if include_collaborator:
+            # Get both owned and collaborator repositories
+            owned_repos = self.github_client.get_user_repositories()
+            collaborator_repos = self.github_client.get_collaborator_repositories()
+            all_repos = owned_repos + collaborator_repos
+        else:
+            # Only owned repositories (default)
+            all_repos = self.github_client.get_user_repositories()
+        
+        return [repo.name for repo in all_repos]
     
     def get_repository_stats(self, repo_name: str, days_back: int = 30) -> dict:
         """Get detailed statistics for a specific repository."""

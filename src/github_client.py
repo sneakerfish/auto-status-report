@@ -39,7 +39,7 @@ class GitHubClient:
             raise
     
     def get_user_repositories(self, include_private: bool = True) -> List[Repository]:
-        """Get all repositories for the authenticated user."""
+        """Get all repositories owned by the authenticated user."""
         repos = []
         page = 1
         per_page = 100
@@ -50,7 +50,53 @@ class GitHubClient:
                 'sort': 'updated',
                 'direction': 'desc',
                 'per_page': per_page,
-                'page': page
+                'page': page,
+                'affiliation': 'owner'  # Only get repositories owned by the user
+            }
+            
+            url = f"{self.base_url}/user/repos"
+            data = self._make_request(url, params)
+            
+            if not data:
+                break
+                
+            for repo_data in data:
+                # Double-check that the owner is the authenticated user
+                if repo_data['owner']['login'].lower() == self.username.lower():
+                    repo = Repository(
+                        name=repo_data['name'],
+                        full_name=repo_data['full_name'],
+                        description=repo_data.get('description'),
+                        url=repo_data['html_url'],
+                        language=repo_data.get('language'),
+                        stars=repo_data['stargazers_count'],
+                        forks=repo_data['forks_count'],
+                        private=repo_data['private']
+                    )
+                    repos.append(repo)
+            
+            if len(data) < per_page:
+                break
+                
+            page += 1
+            time.sleep(0.1)  # Rate limiting
+        
+        return repos
+    
+    def get_collaborator_repositories(self, include_private: bool = True) -> List[Repository]:
+        """Get repositories where the user is a collaborator (not owner)."""
+        repos = []
+        page = 1
+        per_page = 100
+        
+        while True:
+            params = {
+                'type': 'all' if include_private else 'public',
+                'sort': 'updated',
+                'direction': 'desc',
+                'per_page': per_page,
+                'page': page,
+                'affiliation': 'collaborator'  # Only get repositories where user is collaborator
             }
             
             url = f"{self.base_url}/user/repos"
@@ -139,10 +185,23 @@ class GitHubClient:
         url = f"{self.base_url}/repos/{self.username}/{repo_name}/commits/{sha}"
         return self._make_request(url)
     
-    def get_recent_activity(self, days_back: int = 7) -> Dict[str, List[Commit]]:
+    def get_recent_activity(self, days_back: int = 7, include_collaborator: bool = None) -> Dict[str, List[Commit]]:
         """Get recent activity across all repositories."""
+        from .config import settings
+        
+        if include_collaborator is None:
+            include_collaborator = settings.include_collaborator_repos
+            
         since = datetime.now() - timedelta(days=days_back)
-        repositories = self.get_user_repositories()
+        
+        if include_collaborator:
+            # Get both owned and collaborator repositories
+            owned_repos = self.get_user_repositories()
+            collaborator_repos = self.get_collaborator_repositories()
+            repositories = owned_repos + collaborator_repos
+        else:
+            # Only owned repositories (default)
+            repositories = self.get_user_repositories()
         
         activity = {}
         
