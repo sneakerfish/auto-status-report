@@ -1,7 +1,7 @@
 """Data processing logic for analyzing commits and generating summaries."""
 
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict, Counter
 
 from .models import Commit, DailyActivity, WorkSummary, StatusReport, Repository
@@ -15,15 +15,15 @@ class DataProcessor:
         self.github_client = github_client
     
     def generate_status_report(
-        self, 
-        days_back: int = 7, 
+        self,
+        days_back: int = 7,
         repositories: Optional[List[str]] = None
     ) -> StatusReport:
         """Generate a comprehensive status report for the specified period."""
-        
+
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days_back)
-        
+
         # Get activity data
         if repositories:
             activity = {}
@@ -35,7 +35,7 @@ class DataProcessor:
                     activity[repo_name] = commits
         else:
             activity = self.github_client.get_recent_activity(days_back)
-        
+
         # Process daily activities
         daily_summaries = self._process_daily_activities(activity, start_date, end_date)
         
@@ -68,20 +68,23 @@ class DataProcessor:
         )
     
     def _process_daily_activities(
-        self, 
-        activity: Dict[str, List[Commit]], 
-        start_date: datetime, 
+        self,
+        activity: Dict[str, List[Commit]],
+        start_date: datetime,
         end_date: datetime
     ) -> List[WorkSummary]:
         """Process commits into daily activity summaries."""
-        
+
         # Group commits by date
         daily_commits = defaultdict(lambda: defaultdict(list))
-        
+
         for repo_name, commits in activity.items():
             for commit in commits:
-                # Normalize date to start of day
+                # Normalize date to start of day and remove timezone info for consistent comparison
                 commit_date = commit.date.replace(hour=0, minute=0, second=0, microsecond=0)
+                if commit_date.tzinfo is not None:
+                    # Convert to naive datetime (remove timezone)
+                    commit_date = commit_date.replace(tzinfo=None)
                 daily_commits[commit_date][repo_name].append(commit)
         
         # Generate daily summaries

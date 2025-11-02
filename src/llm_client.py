@@ -14,7 +14,7 @@ class LLMClient:
     def __init__(self):
         self.base_url = settings.ollama_base_url
         self.model = settings.ollama_model
-        self.timeout = 120  # Ollama can take longer than OpenAI
+        self.timeout = 600  # 10 minutes - Ollama can be slow on CPU-only machines
     
     def _call_ollama(self, prompt: str, system_prompt: str = None) -> str:
         """Make a call to the Ollama API."""

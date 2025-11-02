@@ -46,13 +46,16 @@ class GitHubClient:
         
         while True:
             params = {
-                'type': 'all' if include_private else 'public',
                 'sort': 'updated',
                 'direction': 'desc',
                 'per_page': per_page,
                 'page': page,
                 'affiliation': 'owner'  # Only get repositories owned by the user
             }
+
+            # Add visibility parameter if we need to filter by private/public
+            if not include_private:
+                params['visibility'] = 'public'
             
             url = f"{self.base_url}/user/repos"
             data = self._make_request(url, params)
@@ -91,13 +94,16 @@ class GitHubClient:
         
         while True:
             params = {
-                'type': 'all' if include_private else 'public',
                 'sort': 'updated',
                 'direction': 'desc',
                 'per_page': per_page,
                 'page': page,
                 'affiliation': 'collaborator'  # Only get repositories where user is collaborator
             }
+
+            # Add visibility parameter if we need to filter by private/public
+            if not include_private:
+                params['visibility'] = 'public'
             
             url = f"{self.base_url}/user/repos"
             data = self._make_request(url, params)
@@ -127,49 +133,63 @@ class GitHubClient:
         return repos
     
     def get_commits_for_repository(
-        self, 
-        repo_name: str, 
-        since: datetime, 
-        until: Optional[datetime] = None
+        self,
+        repo_name: str,
+        since: datetime,
+        until: Optional[datetime] = None,
+        author: Optional[str] = None
     ) -> List[Commit]:
-        """Get commits for a specific repository within a date range."""
+        """Get commits for a specific repository within a date range.
+
+        Args:
+            repo_name: Name of the repository
+            since: Start date for commits
+            until: End date for commits (optional)
+            author: Filter by author (git name or email). If None, returns all commits.
+        """
         commits = []
         page = 1
         per_page = 100
-        
+
         params = {
-            'author': self.username,
             'since': since.isoformat(),
             'per_page': per_page,
             'page': page
         }
-        
+
+        # Only filter by author if explicitly specified
+        if author:
+            params['author'] = author
+
         if until:
             params['until'] = until.isoformat()
         
         while True:
             url = f"{self.base_url}/repos/{self.username}/{repo_name}/commits"
             data = self._make_request(url, params)
-            
+
             if not data:
                 break
             
             for commit_data in data:
-                # Get detailed commit information including stats
-                commit_detail = self._get_commit_details(repo_name, commit_data['sha'])
-                
-                commit = Commit(
-                    sha=commit_data['sha'],
-                    message=commit_data['commit']['message'],
-                    author=commit_data['commit']['author']['name'],
-                    date=parser.parse(commit_data['commit']['author']['date']),
-                    url=commit_data['html_url'],
-                    additions=commit_detail.get('stats', {}).get('additions', 0),
-                    deletions=commit_detail.get('stats', {}).get('deletions', 0),
-                    files_changed=len(commit_detail.get('files', [])),
-                    files=[f['filename'] for f in commit_detail.get('files', [])]
-                )
-                commits.append(commit)
+                try:
+                    # Get detailed commit information including stats
+                    commit_detail = self._get_commit_details(repo_name, commit_data['sha'])
+
+                    commit = Commit(
+                        sha=commit_data['sha'],
+                        message=commit_data['commit']['message'],
+                        author=commit_data['commit']['author']['name'],
+                        date=parser.parse(commit_data['commit']['author']['date']),
+                        url=commit_data['html_url'],
+                        additions=commit_detail.get('stats', {}).get('additions', 0),
+                        deletions=commit_detail.get('stats', {}).get('deletions', 0),
+                        files_changed=len(commit_detail.get('files', [])),
+                        files=[f['filename'] for f in commit_detail.get('files', [])]
+                    )
+                    commits.append(commit)
+                except Exception as e:
+                    print(f"  ✗ Error processing commit {commit_data['sha'][:7]} in {repo_name}: {e}")
             
             if len(data) < per_page:
                 break
@@ -211,7 +231,7 @@ class GitHubClient:
             if commits:
                 activity[repo.name] = commits
             time.sleep(0.2)  # Rate limiting between repositories
-        
+
         return activity
     
     def test_connection(self) -> bool:
