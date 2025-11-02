@@ -1,104 +1,174 @@
 """Report generation system for creating formatted status reports."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from pathlib import Path
 import json
+import pytz
 
-from .models import StatusReport, WorkSummary
+from .models import StatusReport, WorkSummary, DailyActivity, Commit
 from .llm_client import LLMClient
 
 
 class ReportGenerator:
     """Generates formatted status reports in various formats."""
-    
+
     def __init__(self, llm_client: Optional[LLMClient] = None):
         self.llm_client = llm_client or LLMClient()
+        self.eastern_tz = pytz.timezone('US/Eastern')
+
+    def _convert_to_eastern(self, dt: datetime) -> str:
+        """Convert a datetime to US Eastern timezone and format it."""
+        if dt.tzinfo is None:
+            # Assume UTC if no timezone info
+            dt = pytz.UTC.localize(dt)
+        eastern_time = dt.astimezone(self.eastern_tz)
+        return eastern_time.strftime('%Y-%m-%d %I:%M %p %Z')
+
+    def _parse_commit_message(self, message: str) -> Tuple[str, Optional[str]]:
+        """Parse commit message into summary and details.
+
+        Returns (summary, details) where details is None if not present or if it's too similar to summary.
+        """
+        lines = message.split('\n')
+        summary = lines[0].strip()
+
+        # Find the detailed description (skip blank lines)
+        details_lines = []
+        for line in lines[1:]:
+            stripped = line.strip()
+            if stripped:
+                details_lines.append(stripped)
+
+        if not details_lines:
+            return summary, None
+
+        details = ' '.join(details_lines)
+
+        # Check if details is too similar to summary (simple check)
+        # If details starts with the same words or is very similar, skip it
+        if details.lower().startswith(summary.lower()[:20]) or summary.lower().startswith(details.lower()[:20]):
+            return summary, None
+
+        # If details is just a longer version of summary with minor additions, skip it
+        summary_words = set(summary.lower().split())
+        details_words = set(details.lower().split())
+
+        # If 80% of words overlap, consider them too similar
+        if len(summary_words) > 0:
+            overlap = len(summary_words & details_words) / len(summary_words)
+            if overlap > 0.8:
+                return summary, None
+
+        return summary, details
+
+    def _strip_line_markings(self, text: str) -> str:
+        """Remove line markings like (lines 27-28, 60-109) from text."""
+        import re
+        # Pattern matches (lines X-Y, Z-W) or (lines X-Y) etc.
+        pattern = r'\s*\(lines\s+[\d\-,\s]+\)'
+        return re.sub(pattern, '', text)
+
+    def _create_commit_narrative(self, commits: List[Commit]) -> str:
+        """Create a narrative paragraph from commit messages."""
+        if not commits:
+            return "No commits."
+
+        narratives = []
+        for commit in commits:
+            # Use the full commit message, not just parsed parts
+            full_message = self._strip_line_markings(commit.message)
+            narratives.append(full_message.strip())
+
+        # Join into a flowing paragraph
+        return ' '.join(narratives)
     
     def generate_markdown_report(
-        self, 
-        status_report: StatusReport, 
+        self,
+        status_report: StatusReport,
         include_llm_summary: bool = True
     ) -> str:
-        """Generate a markdown formatted status report."""
-        
+        """Generate a diary-style markdown formatted status report."""
+
         report_lines = []
-        
+
         # Header
         report_lines.append("# GitHub Activity Status Report")
         report_lines.append("")
         report_lines.append(f"**Period**: {status_report.start_date.strftime('%Y-%m-%d')} to {status_report.end_date.strftime('%Y-%m-%d')}")
         report_lines.append(f"**Generated**: {status_report.generated_at.strftime('%Y-%m-%d %H:%M:%S')}")
         report_lines.append("")
-        
+
         # Executive Summary
-        report_lines.append("## Executive Summary")
+        active_days = len([s for s in status_report.daily_summaries if s.total_commits > 0])
+        report_lines.append("## Overview")
         report_lines.append("")
-        report_lines.append(f"- **Total Repositories**: {status_report.total_repositories}")
-        report_lines.append(f"- **Total Commits**: {status_report.total_commits}")
-        report_lines.append(f"- **Lines Added**: {status_report.total_additions:,}")
-        report_lines.append(f"- **Lines Deleted**: {status_report.total_deletions:,}")
-        report_lines.append(f"- **Net Changes**: {status_report.total_additions - status_report.total_deletions:,}")
+        report_lines.append(f"During this {len(status_report.daily_summaries)}-day period, you worked across **{status_report.total_repositories} repositories** "
+                           f"on **{active_days} active days**, making **{status_report.total_commits} commits** with "
+                           f"**{status_report.total_additions:,} lines added** and **{status_report.total_deletions:,} lines deleted** "
+                           f"(net: **{status_report.total_additions - status_report.total_deletions:,} lines**).")
         report_lines.append("")
-        
+
         # Most Active Repositories
         if status_report.most_active_repos:
-            report_lines.append("## Most Active Repositories")
+            repo_list = ', '.join(f"**{repo}**" for repo in status_report.most_active_repos[:5])
+            report_lines.append(f"Your most active repositories were: {repo_list}.")
             report_lines.append("")
-            for i, repo in enumerate(status_report.most_active_repos, 1):
-                report_lines.append(f"{i}. {repo}")
-            report_lines.append("")
-        
-        # LLM Summary
-        if include_llm_summary and status_report.total_commits > 0:
-            report_lines.append("## AI-Generated Summary")
-            report_lines.append("")
-            try:
-                llm_summary = self.llm_client.generate_status_summary(status_report)
-                report_lines.append(llm_summary)
-                report_lines.append("")
-            except Exception as e:
-                report_lines.append(f"*Error generating AI summary: {e}*")
-                report_lines.append("")
-        
-        # Daily Breakdown
-        report_lines.append("## Daily Activity Breakdown")
+
+        # Note: Overall AI summary removed - using daily summaries instead
+
+        # Daily Diary-Style Breakdown
+        report_lines.append("---")
         report_lines.append("")
-        
+        report_lines.append("## Daily Activity")
+        report_lines.append("")
+
         for daily_summary in status_report.daily_summaries:
             if daily_summary.total_commits > 0:
-                report_lines.append(f"### {daily_summary.date.strftime('%Y-%m-%d (%A)')}")
+                report_lines.append(f"### {daily_summary.date.strftime('%A, %B %d, %Y')}")
                 report_lines.append("")
-                report_lines.append(f"- **Commits**: {daily_summary.total_commits}")
-                report_lines.append(f"- **Repositories**: {', '.join(daily_summary.repositories)}")
-                report_lines.append(f"- **Changes**: +{daily_summary.total_additions:,} / -{daily_summary.total_deletions:,}")
-                report_lines.append(f"- **Files Changed**: {daily_summary.total_files_changed}")
-                
-                if daily_summary.primary_languages:
-                    report_lines.append(f"- **Languages**: {', '.join(daily_summary.primary_languages)}")
-                
-                # Repository-specific details
-                if len(daily_summary.repositories) > 1:
-                    report_lines.append("")
-                    report_lines.append("**Repository Details**:")
-                    for repo_name, activity in daily_summary.activity_by_repo.items():
-                        report_lines.append(f"- **{repo_name}**: {activity.commit_count} commits, {activity.total_additions} additions, {activity.total_deletions} deletions")
-                
-                # Recent commit messages
-                if daily_summary.activity_by_repo:
-                    first_repo_activity = list(daily_summary.activity_by_repo.values())[0]
-                    if first_repo_activity.commits:
+
+                # Collect all commits from all repositories for this day
+                all_commits = []
+                for repo_name, activity in daily_summary.activity_by_repo.items():
+                    for commit in activity.commits:
+                        all_commits.append((repo_name, commit))
+
+                # Sort commits by time
+                all_commits.sort(key=lambda x: x[1].date)
+
+                # Create single table for all commits on this day
+                report_lines.append("| Commit ID | Time (US/Eastern) | Repository | Changes (+/-) |")
+                report_lines.append("|-----------|-------------------|------------|---------------|")
+
+                for repo_name, commit in all_commits:
+                    short_sha = commit.sha[:7]
+                    timestamp = self._convert_to_eastern(commit.date)
+                    lines_changed = f"+{commit.additions}/-{commit.deletions}"
+
+                    report_lines.append(f"| `{short_sha}` | {timestamp} | {repo_name} | {lines_changed} |")
+
+                report_lines.append("")
+
+                # Generate AI summary for this day's commits
+                if include_llm_summary:
+                    try:
+                        daily_ai_summary = self.llm_client.generate_daily_summary(daily_summary)
+                        report_lines.append(daily_ai_summary)
                         report_lines.append("")
-                        report_lines.append("**Recent Commits**:")
-                        for commit in first_repo_activity.commits[:3]:
-                            report_lines.append(f"- {commit.message[:80]}{'...' if len(commit.message) > 80 else ''}")
-                
-                report_lines.append("")
-            else:
-                report_lines.append(f"### {daily_summary.date.strftime('%Y-%m-%d (%A)')}")
-                report_lines.append("*No commits on this day*")
-                report_lines.append("")
-        
+                    except Exception as e:
+                        # Fallback to manual narrative if LLM fails
+                        commits_only = [commit for _, commit in all_commits]
+                        narrative = self._create_commit_narrative(commits_only)
+                        report_lines.append(narrative)
+                        report_lines.append("")
+                else:
+                    # If LLM disabled, use manual narrative
+                    commits_only = [commit for _, commit in all_commits]
+                    narrative = self._create_commit_narrative(commits_only)
+                    report_lines.append(narrative)
+                    report_lines.append("")
+
         return "\n".join(report_lines)
     
     def generate_json_report(self, status_report: StatusReport) -> str:

@@ -3,6 +3,7 @@
 from typing import List, Dict, Any, Optional
 import requests
 import json
+import re
 
 from .config import settings
 from .models import StatusReport, WorkSummary, DailyActivity
@@ -10,20 +11,27 @@ from .models import StatusReport, WorkSummary, DailyActivity
 
 class LLMClient:
     """Client for generating intelligent summaries using Ollama."""
-    
+
     def __init__(self):
         self.base_url = settings.ollama_base_url
         self.model = settings.ollama_model
-        self.timeout = 600  # 10 minutes - Ollama can be slow on CPU-only machines
+        self.api_key = settings.ollama_api_key
+        self.timeout = 2400  # 40 minutes - Ollama can be slow on CPU-only machines
+
+    def _strip_line_markings(self, text: str) -> str:
+        """Remove line markings like (lines 27-28, 60-109) from text."""
+        # Pattern matches (lines X-Y, Z-W) or (lines X-Y) etc.
+        pattern = r'\s*\(lines\s+[\d\-,\s]+\)'
+        return re.sub(pattern, '', text)
     
     def _call_ollama(self, prompt: str, system_prompt: str = None) -> str:
         """Make a call to the Ollama API."""
-        
+
         # Prepare the full prompt with system message if provided
         full_prompt = prompt
         if system_prompt:
             full_prompt = f"System: {system_prompt}\n\nUser: {prompt}\n\nAssistant:"
-        
+
         payload = {
             "model": self.model,
             "prompt": full_prompt,
@@ -34,18 +42,24 @@ class LLMClient:
                 "max_tokens": 1000
             }
         }
-        
+
+        # Prepare headers with API key if available (for Ollama Cloud)
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         try:
             response = requests.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
+                headers=headers,
                 timeout=self.timeout
             )
             response.raise_for_status()
-            
+
             result = response.json()
             return result.get("response", "").strip()
-            
+
         except requests.exceptions.RequestException as e:
             raise Exception(f"Ollama API call failed: {e}")
         except json.JSONDecodeError as e:
@@ -54,8 +68,17 @@ class LLMClient:
     def test_connection(self) -> bool:
         """Test the connection to Ollama."""
         try:
+            # Prepare headers with API key if available
+            headers = {}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             # Try to list models to test connection
-            response = requests.get(f"{self.base_url}/api/tags", timeout=10)
+            response = requests.get(
+                f"{self.base_url}/api/tags",
+                headers=headers,
+                timeout=10
+            )
             response.raise_for_status()
             return True
         except Exception as e:
@@ -103,7 +126,7 @@ class LLMClient:
                 'additions': activity.total_additions,
                 'deletions': activity.total_deletions,
                 'files_changed': activity.total_files_changed,
-                'commit_messages': [commit.message for commit in activity.commits[:3]]  # Top 3 commits
+                'commit_messages': [commit.message for commit in activity.commits]  # ALL commits
             }
         
         prompt = self._create_daily_prompt(daily_data)
@@ -192,30 +215,29 @@ Keep the tone professional and informative, suitable for a status report.
     
     def _create_daily_prompt(self, daily_data: Dict[str, Any]) -> str:
         """Create a prompt for generating a daily summary."""
-        
-        repo_details = []
+
+        # Collect ALL commit messages from ALL repositories for this day
+        all_commit_messages = []
         for repo_name, details in daily_data['activity_by_repo'].items():
-            repo_details.append(f"- {repo_name}: {details['commits']} commits, {details['additions']} additions, {details['deletions']} deletions")
-        
+            for msg in details.get('commit_messages', []):
+                # Strip line markings from commit messages
+                cleaned_msg = self._strip_line_markings(msg)
+                all_commit_messages.append(f"[{repo_name}] {cleaned_msg}")
+
         return f"""
-Please create a brief daily summary for {daily_data['date']}:
+Please create a journal-style summary for the development work done on {daily_data['date']}.
 
-**Activity**:
+Read through all the commit messages below and write a cohesive paragraph (2-4 sentences) that summarizes the main work accomplished that day. Focus on what was built, fixed, or improved - the key accomplishments and changes.
+
+**All Commit Messages for {daily_data['date']}**:
+{chr(10).join(f"- {msg}" for msg in all_commit_messages)}
+
+**Statistics**:
 - Total commits: {daily_data['total_commits']}
-- Lines added: {daily_data['total_additions']}
-- Lines deleted: {daily_data['total_deletions']}
-- Files changed: {daily_data['total_files_changed']}
 - Repositories: {', '.join(daily_data['repositories'])}
+- Lines changed: +{daily_data['total_additions']}/-{daily_data['total_deletions']}
 
-**Repository Details**:
-{chr(10).join(repo_details)}
-
-**Primary Languages**: {', '.join(daily_data['primary_languages']) if daily_data['primary_languages'] else 'Not specified'}
-
-**Recent Commit Messages**:
-{chr(10).join(f"- {msg}" for msg in daily_data['activity_by_repo'].get(list(daily_data['activity_by_repo'].keys())[0], {}).get('commit_messages', []))}
-
-Provide a concise 1-2 sentence summary of the day's work, highlighting the main focus areas and any notable changes.
+Write a natural, flowing summary that captures the essence of the day's work. This is for a personal journal, so write in a narrative style.
 """
     
     def _generate_fallback_summary(self, status_report: StatusReport) -> str:

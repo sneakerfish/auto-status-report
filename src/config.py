@@ -19,6 +19,7 @@ class Settings:
         # Ollama Configuration
         self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3:latest")
+        self.ollama_api_key = os.getenv("OLLAMA_API_KEY", "")  # Optional, for Ollama Cloud
         
         # Report Configuration
         self.default_days_back = int(os.getenv("DEFAULT_DAYS_BACK", "7"))
