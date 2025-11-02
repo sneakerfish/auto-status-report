@@ -5,10 +5,11 @@ An intelligent GitHub activity tracker that generates comprehensive status repor
 ## Features
 
 - 🔍 **Comprehensive Analysis**: Track commits, additions, deletions, and file changes across all your repositories
-- 🤖 **AI-Powered Summaries**: Generate intelligent insights about your development patterns using local Ollama models
+- 🤖 **AI-Powered Summaries**: Generate intelligent journal-style summaries of your daily development work using Ollama (local or cloud)
 - 📊 **Multiple Formats**: Export reports in Markdown, JSON, or CSV formats
 - 📅 **Flexible Time Ranges**: Generate reports for any date range or specific days
-- 🎯 **Repository Filtering**: Focus on specific repositories or analyze all your work
+- 🎯 **Repository Filtering**: Focus on specific repositories or analyze all your work (owned and collaborator repos)
+- ⏰ **Timezone Support**: All timestamps displayed in US/Eastern timezone for consistency
 - 🖥️ **CLI Interface**: Easy-to-use command-line interface for automation
 - 🏗️ **Jenkins Ready**: Designed to run on your Jenkins server for automated reporting
 
@@ -36,8 +37,10 @@ An intelligent GitHub activity tracker that generates comprehensive status repor
    GITHUB_USERNAME=your_github_username
    OLLAMA_BASE_URL=http://localhost:11434
    OLLAMA_MODEL=llama3:latest
+   OLLAMA_API_KEY=  # Optional: For Ollama Cloud
    DEFAULT_DAYS_BACK=7
    REPORT_FORMAT=markdown
+   INCLUDE_COLLABORATOR_REPOS=false
    ```
 
 ## GitHub Token Setup
@@ -51,11 +54,15 @@ An intelligent GitHub activity tracker that generates comprehensive status repor
 
 ## Ollama Setup
 
+You can use Ollama either locally or via Ollama Cloud.
+
+### Option 1: Local Ollama (Free)
+
 1. **Install Ollama** (if not already installed):
    ```bash
    # On macOS/Linux
    curl -fsSL https://ollama.ai/install.sh | sh
-   
+
    # Or download from https://ollama.ai/download
    ```
 
@@ -68,10 +75,10 @@ An intelligent GitHub activity tracker that generates comprehensive status repor
    ```bash
    # Llama 3 (recommended, ~4.7GB)
    ollama pull llama3:latest
-   
+
    # Or Granite 3.3 (IBM's model, ~4.9GB)
    ollama pull granite3.3:latest
-   
+
    # Or Gemma 3 4B (smaller, ~3.3GB)
    ollama pull gemma3:4b
    ```
@@ -79,6 +86,17 @@ An intelligent GitHub activity tracker that generates comprehensive status repor
 4. **Verify installation**:
    ```bash
    ollama list
+   ```
+
+### Option 2: Ollama Cloud
+
+1. Sign up for Ollama Cloud at https://ollama.com
+2. Get your API key from your account settings
+3. Add to your `.env` file:
+   ```env
+   OLLAMA_BASE_URL=https://api.ollama.com  # Or your cloud endpoint
+   OLLAMA_API_KEY=your_api_key_here
+   OLLAMA_MODEL=llama3:latest
    ```
 
 ## Usage
@@ -107,8 +125,11 @@ python main.py daily
 # Generate daily report for a specific date
 python main.py daily --date 2024-01-15
 
-# List all your repositories
+# List all your owned repositories
 python main.py repos
+
+# List all repositories (including where you're a collaborator)
+python main.py repos --include-collaborator
 
 # Get detailed stats for a specific repository
 python main.py stats my-repository --days 30
@@ -149,7 +170,9 @@ To run this tool from your Jenkins server:
 1. **Set up environment variables** in Jenkins:
    - `GITHUB_TOKEN`: Your GitHub personal access token
    - `GITHUB_USERNAME`: Your GitHub username
-   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `OLLAMA_BASE_URL`: Your Ollama server URL (local or cloud)
+   - `OLLAMA_MODEL`: The model to use
+   - `OLLAMA_API_KEY`: Your Ollama Cloud API key (if using cloud)
 
 2. **Create a Jenkins job** with a shell script:
    ```bash
@@ -163,9 +186,10 @@ To run this tool from your Jenkins server:
 ## Report Formats
 
 ### Markdown (Default)
-- Human-readable format with sections and formatting
-- Perfect for sharing with team members or managers
-- Includes AI-generated insights and summaries
+- Human-readable journal-style format with narrative daily summaries
+- Commits organized by day with timestamps in US/Eastern timezone
+- AI-generated summaries that read like a development diary
+- Perfect for sharing with team members or keeping a development log
 
 ### JSON
 - Machine-readable format for further processing
@@ -192,23 +216,24 @@ Lines Deleted: 89
 Net Changes: 1,158
 Most Active Repos: my-project, api-service, frontend-app
 Active Days: 5/7
-
-AI Summary:
-----------------------------------------
-This week shows strong development activity across three main projects. 
-The focus appears to be on feature development with significant code 
-additions in the my-project repository. The consistent daily commits 
-indicate active development with good momentum.
 ============================================================
 ```
 
 ### Markdown Report Structure
-- Executive Summary with key metrics
-- Most Active Repositories
-- AI-Generated Summary
-- Daily Activity Breakdown
-- Repository-specific details
-- Recent commit messages
+The generated reports now use a **journal-style format**:
+
+- **Overview**: Summary statistics for the entire period
+- **Most Active Repositories**: Quick reference of where you spent most time
+- **Daily Activity**: For each active day:
+  - Day and date header (e.g., "Monday, January 15, 2024")
+  - Table of all commits with:
+    - Commit ID
+    - Timestamp (US/Eastern timezone)
+    - Repository name
+    - Lines changed (+/-)
+  - **AI-generated narrative summary** describing what was accomplished that day in prose format
+
+This format makes it easy to track your development progress like a daily journal, with AI helping to create readable summaries of technical work.
 
 ## Configuration Options
 
@@ -216,10 +241,12 @@ indicate active development with good momentum.
 |----------|-------------|---------|
 | `GITHUB_TOKEN` | GitHub personal access token | Required |
 | `GITHUB_USERNAME` | Your GitHub username | Required |
-| `OLLAMA_BASE_URL` | Ollama server URL | http://localhost:11434 |
+| `OLLAMA_BASE_URL` | Ollama server URL (local or cloud) | http://localhost:11434 |
 | `OLLAMA_MODEL` | Ollama model to use | llama3:latest |
+| `OLLAMA_API_KEY` | Ollama Cloud API key (optional) | (empty) |
 | `DEFAULT_DAYS_BACK` | Default number of days to analyze | 7 |
 | `REPORT_FORMAT` | Default report format | markdown |
+| `INCLUDE_COLLABORATOR_REPOS` | Include repos where you're a collaborator | false |
 
 ## Troubleshooting
 
@@ -230,10 +257,12 @@ indicate active development with good momentum.
    - If you hit limits, wait a few minutes and try again
 
 2. **Ollama Connection Issues**
-   - Make sure Ollama is running: `ollama serve`
-   - Check that the model is installed: `ollama list`
+   - Make sure Ollama is running: `ollama serve` (for local setup)
+   - Check that the model is installed: `ollama list` (for local setup)
    - Verify the OLLAMA_BASE_URL in your .env file
+   - For Ollama Cloud, verify your OLLAMA_API_KEY is correct
    - The tool will work without AI summaries if Ollama is unavailable
+   - Note: AI summary generation can take several minutes on CPU-only systems
 
 3. **Repository Not Found**
    - Ensure the repository name is correct
@@ -268,9 +297,9 @@ auto-status-report/
 │   ├── config.py           # Configuration management
 │   ├── data_processor.py   # Data analysis logic
 │   ├── github_client.py    # GitHub API client
-│   ├── llm_client.py       # OpenAI API client
+│   ├── llm_client.py       # Ollama LLM client for AI summaries
 │   ├── models.py           # Data models
-│   └── report_generator.py # Report generation
+│   └── report_generator.py # Journal-style report generation
 ├── main.py                 # Entry point
 ├── requirements.txt        # Dependencies
 ├── config.env.example     # Environment template
