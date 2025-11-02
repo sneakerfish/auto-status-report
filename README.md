@@ -73,9 +73,9 @@ You can use Ollama either locally or via Ollama Cloud.
 1.  **Install Ollama**:
     ```bash
     # On macOS/Linux
-    curl -fsSL [https://ollama.ai/install.sh](https://ollama.ai/install.sh) | sh
+    curl -fsSL https://ollama.ai/install.sh | sh
 
-    # Or download from [https://ollama.ai/download](https://ollama.ai/download)
+    # Or download from https://ollama.ai/download
     ```
 
 2.  **Start Ollama service**:
@@ -99,7 +99,7 @@ You can use Ollama either locally or via Ollama Cloud.
 2.  Get your API key from your account settings.
 3.  Add the following to your `.env` file:
     ```env
-    OLLAMA_BASE_URL=[https://api.ollama.com](https://api.ollama.com)  # Or your cloud endpoint
+    OLLAMA_BASE_URL=https://api.ollama.com  # Or your cloud endpoint
     OLLAMA_API_KEY=your_api_key_here
     OLLAMA_MODEL=llama3:latest
     ```
